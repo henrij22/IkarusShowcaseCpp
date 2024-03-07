@@ -37,7 +37,7 @@ int main(int argc, char** argv) {
   using GridView = Grid::LeafGridView;
 
   const auto grid = Dune::IGA::IbraReader<2, 3>::read("input/plate_holes.ibra", trim);
-  grid->globalRefine(6);
+  grid->globalRefine(4);
   const GridView gridView = grid->leafGridView();
 
   using namespace Dune::Functions::BasisFactory;
