@@ -4,5 +4,5 @@
 build-cmake
 .idea/
 *cmake-build*
-
+build/
 # need to add other file formats
