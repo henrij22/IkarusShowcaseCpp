@@ -1,0 +1,12 @@
+################################
+# Dune module information file #
+################################
+
+# Name of the module
+Module: iga_cpp
+Version: 0.1.0
+Maintainer: jakob@ibb.uni-stuttgart.de
+# Required build dependencies
+Depends: ikarus dune-iga
+# Optional build dependencies
+#Suggests:
