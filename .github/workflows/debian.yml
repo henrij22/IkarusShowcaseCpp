@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: 2021-2024 The Ikarus Developers mueller@ibb.uni-stuttgart.de
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
+name: Debian
+on:
+  push:
+
+jobs:
+  Build:
+    name: ${{ matrix.config.name }}
+    runs-on: ubuntu-latest
+    container:
+      image: ikarusproject/ikarus-${{ matrix.config.compiler }}:latest
+      options: --memory-swap="20g" --memory="20g" --cpus="2"
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          #          - {
+          #            name: "Clang-Debug",
+          #            config: Debug,
+          #            compilerC: clang-12,
+          #            compilerCxx: clang++-12,
+          #            lib: "-stdlib=libc++",
+          #           }
+          - {
+            name: "Clang-Release",
+            config: Release,
+            compiler: clang,
+            compilerC: clang-16,
+            compilerCxx: clang++-16,
+            lib: "-stdlib=libc++",
+          }
+          #          - {
+          #            name: "GCC-Debug",
+          #            config: Debug,
+          #            compilerC: gcc-12,
+          #            compilerCxx: g++-12,
+          #            lib: ""
+          #          }
+          - {
+            name: "GCC-Release",
+            config: Release,
+            compiler: gcc,
+            compilerC: gcc-12,
+            compilerCxx: g++-12,
+            lib: ""
+          }
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          path: 'repo'
+      - name: Build
+        working-directory: ./repo
+        run: |
+          mkdir cmake-build-${{ matrix.config.config }}
+          cd cmake-build-${{ matrix.config.config }}
+          cmake ../  -DCMAKE_BUILD_TYPE=${{ matrix.config.config }} -G "Unix Makefiles" -DCMAKE_C_COMPILER=${{ matrix.config.compilerC }} -DCMAKE_CXX_COMPILER=${{ matrix.config.compilerCxx }}
+          cmake --build . --parallel 2 --target iga_cpp
+      - name: Run all examples
+        working-directory: ./repo/cmake-build-${{ matrix.config.config }}/src
+        run: |
+          echo "Testing ..." && ./iga_cpp;
