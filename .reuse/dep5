@@ -1,0 +1,10 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Ikarus IGA Showcase
+Upstream-Contact: Henrik Jakob <jakob@ibb.uni-stuttgart.de>
+Source: https://ikarus-project.github.io/
+
+# Sample paragraph, commented out:
+#
+# Files: src/*
+# Copyright: $YEAR $NAME <$CONTACT>
+# License: ...

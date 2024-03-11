@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2024 Henrik Jakob jakob@ibb.uni-stuttgart.de
+# SPDX-License-Identifier: MIT
+
 add_executable("iga_cpp" iga_cpp.cpp)
 target_link_dune_default_libraries("iga_cpp")
 
