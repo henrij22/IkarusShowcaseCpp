@@ -20,15 +20,18 @@
 #include <ikarus/assembler/simpleassemblers.hh>
 #include <ikarus/controlroutines/loadcontrol.hh>
 #include <ikarus/finiteelements/fefactory.hh>
-#include <ikarus/finiteelements/mechanics/loads.hh>
-#include <ikarus/utils/nonlinearoperator.hh>
 #include <ikarus/finiteelements/mechanics/kirchhoffloveshell.hh>
+#include <ikarus/finiteelements/mechanics/loads.hh>
 #include <ikarus/solver/nonlinearsolver/newtonraphson.hh>
 #include <ikarus/solver/nonlinearsolver/trustregion.hh>
+#include <ikarus/solver/linearsolver/linearsolver.hh>
 #include <ikarus/utils/basis.hh>
 #include <ikarus/utils/dirichletvalues.hh>
 #include <ikarus/utils/functionhelper.hh>
 #include <ikarus/utils/init.hh>
+#include <ikarus/utils/nonlinearoperator.hh>
+#include <ikarus/utils/linearalgebrahelper.hh>
+
 
 auto run_calculation(int degree, int refinement) {
   /// Defs
@@ -59,7 +62,8 @@ auto run_calculation(int degree, int refinement) {
     return Eigen::Vector3d{0, 0, 2 * Dune::power(thk, 3) * lamb};
   };
 
-  auto sk = Ikarus::skills(Ikarus::kirchhoffLoveShell({.youngs_modulus = Emod, .nu = nu, .thickness = thk}), Ikarus::volumeLoad<3>(vL));
+  auto sk = Ikarus::skills(Ikarus::kirchhoffLoveShell({.youngs_modulus = Emod, .nu = nu, .thickness = thk}),
+                           Ikarus::volumeLoad<3>(vL));
 
   using KLShell = decltype(Ikarus::makeFE(basis, sk));
   std::vector<KLShell> fes;
@@ -74,38 +78,41 @@ auto run_calculation(int degree, int refinement) {
 
   /// Define "elastoStatics" affordances and create functions for stiffness matrix and residual calculations
   auto req = Ikarus::FErequirements().addAffordance(Ikarus::AffordanceCollections::elastoStatics);
+  auto lambdaLoad = 1.0;
+  req.insertParameter(Ikarus::FEParameter::loadfactor, lambdaLoad);
 
-  auto energyFunction = [&](auto&& disp_, auto&& lambdaLocal) -> auto& {
-    req.insertGlobalSolution(Ikarus::FESolutions::displacement, disp_)
-        .insertParameter(Ikarus::FEParameter::loadfactor, lambdaLocal);
-    return sparseAssembler.getScalar(req);
-  };
+  Eigen::VectorXd d = Eigen::VectorXd::Zero(sparseAssembler.reducedSize());
+  Eigen::VectorXd deltaD = Eigen::VectorXd::Zero(sparseAssembler.reducedSize());
+  Eigen::VectorXd dFull = Eigen::VectorXd::Zero(sparseAssembler.size());
+  req.insertGlobalSolution(Ikarus::FESolutions::displacement, dFull);
 
-  auto residualFunction = [&](auto&& disp_, auto&& lambdaLocal) -> auto& {
-    req.insertGlobalSolution(Ikarus::FESolutions::displacement, disp_)
-        .insertParameter(Ikarus::FEParameter::loadfactor, lambdaLocal);
-    return sparseAssembler.getVector(req);
-  };
+  auto solver = Ikarus::LinearSolver(Ikarus::SolverTypeTag::sd_SparseLU);
 
-  auto KFunction = [&](auto&& disp_, auto&& lambdaLocal) -> auto& {
-    req.insertGlobalSolution(Ikarus::FESolutions::displacement, disp_)
-        .insertParameter(Ikarus::FEParameter::loadfactor, lambdaLocal);
-    return sparseAssembler.getMatrix(req);
-  };
+  constexpr double abs_tolerance = 1e-9;
+  constexpr int maxIter = 300;
+  int iterations{};
 
-  Eigen::VectorXd d = Eigen::VectorXd::Zero(basis.flat().size());
+  solver.analyzePattern(sparseAssembler.getReducedMatrix(req));
+  for (auto k : Dune::range(maxIter)) {
+    dFull = sparseAssembler.createFullVector(d);
+    req.insertGlobalSolution(Ikarus::FESolutions::displacement, dFull);
+    
+    const auto& rx = sparseAssembler.getReducedVector(req);
+    const auto& Ax = sparseAssembler.getReducedMatrix(req);
+    auto r_norm = Ikarus::norm(rx);
 
-  auto nonLinOp = Ikarus::NonLinearOperator(Ikarus::functions(energyFunction, residualFunction, KFunction),
-                                            Ikarus::parameter(d, 1.0));
-
-  auto solver        = Ikarus::makeTrustRegion(nonLinOp);
-  auto settings      = Ikarus::TrustRegionSettings{};
-  settings.maxIter   = 300;
-  settings.verbosity = 0;
-  settings.grad_tol  = 1e-9;
-  solver->setup(settings);
-
-  auto information = solver->solve();
+    solver.factorize(Ax);
+    solver.solve(deltaD, rx);
+    d -= deltaD;
+    
+    if (r_norm < abs_tolerance) {
+      std::cout << "Solution found after " << k << " iterations, norm: " << r_norm << std::endl;
+      iterations = k;
+      break;
+    }
+    if (k == maxIter-1)
+      std::cout << "Solution not found after " << k << " iterations, norm: " << r_norm << std::endl;
+  }
 
   auto dispGlobalFunc = Dune::Functions::makeDiscreteGlobalBasisFunction<Dune::FieldVector<double, 3>>(basis.flat(), d);
 
@@ -138,7 +145,7 @@ auto run_calculation(int degree, int refinement) {
     ++i;
   }
 
-  return std::make_tuple(*std::ranges::max_element(nodalDisplacements), information.iterations,
+  return std::make_tuple(*std::ranges::max_element(nodalDisplacements), iterations,
                          sparseAssembler.reducedSize());
 }
 
@@ -147,15 +154,16 @@ int main(int argc, char** argv) {
   Timer<> timer{};
 
   std::vector<std::tuple<int, int, double, int, int, Timer<>::Period>> results{};
-  for (auto i : Dune::range(2, 3))
+  for (auto i : Dune::range(2, 4)) {
     for (auto j : Dune::range(3, 6)) {
       timer.startTimer("total");
       auto [max_d, iterations, dofs] = run_calculation(i, j);
       results.emplace_back(i, j, max_d, iterations, dofs, timer.stopTimer("total").count());
     }
+  }
 
   for (auto [degree, refinement, max_d, iterations, dofs, seconds] : results)
     std::cout << "Degree: " << degree << ", Ref: " << refinement << ", max_d: " << max_d
-              << ", iterations: " << iterations << ", Dofs: " << dofs  << ", Compute time: " << seconds << std::endl;
+              << ", iterations: " << iterations << ", Dofs: " << dofs << ", Compute time: " << seconds << std::endl;
   return 0;
 }
