@@ -31,6 +31,8 @@
 #include <ikarus/utils/init.hh>
 #include <ikarus/utils/linearalgebrahelper.hh>
 #include <ikarus/utils/nonlinearoperator.hh>
+#include <ikarus/utils/observer/genericobserver.hh>
+#include <ikarus/utils/observer/observermessages.hh>
 
 auto run_calculation(int degree, int refinement) {
   /// Defs
@@ -143,7 +145,6 @@ auto run_calculation(int degree, int refinement) {
     }
     nodalDisplacements(i) = localDisplacements(vertexWithMaxDisplacement)[2];
     ++i;
-    
   }
 
   return std::make_tuple(*std::ranges::max_element(nodalDisplacements), informations.iterations, sparseAssembler.reducedSize());
