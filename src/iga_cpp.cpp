@@ -31,6 +31,8 @@
 #include <ikarus/utils/init.hh>
 #include <ikarus/utils/linearalgebrahelper.hh>
 #include <ikarus/utils/nonlinearoperator.hh>
+#include <ikarus/utils/observer/genericobserver.hh>
+#include <ikarus/utils/observer/observermessages.hh>
 
 auto run_calculation(int degree, int refinement) {
   /// Defs
@@ -80,7 +82,6 @@ auto run_calculation(int degree, int refinement) {
   auto lambdaLoad = 1.0;
   req.insertParameter(Ikarus::FEParameter::loadfactor, lambdaLoad);
 
-  
   auto residualFunction = [&](auto&& disp_, auto&& lambdaLocal) -> auto& {
     req.insertGlobalSolution(Ikarus::FESolutions::displacement, disp_)
         .insertParameter(Ikarus::FEParameter::loadfactor, lambdaLocal);
@@ -104,17 +105,16 @@ auto run_calculation(int degree, int refinement) {
   auto nonLinOp = Ikarus::NonLinearOperator(Ikarus::functions(energyFunction, residualFunction, KFunction),
                                             Ikarus::parameter(d, lambdaLoad));
 
-  auto trustRegion  = Ikarus::makeTrustRegion(nonLinOp);
-  auto settings     = Ikarus::TrustRegionSettings{};
-  settings.maxIter  = 300;
-  settings.grad_tol = 1e-8;
+  auto trustRegion   = Ikarus::makeTrustRegion(nonLinOp);
+  auto settings      = Ikarus::TrustRegionSettings{};
+  settings.maxIter   = 300;
+  settings.grad_tol  = 1e-8;
   settings.verbosity = 0;
   trustRegion->setup(settings);
 
   auto informations = trustRegion->solve();
 
-  auto dispGlobalFunc =
-      Dune::Functions::makeDiscreteGlobalBasisFunction<Dune::FieldVector<double, 3>>(basis.flat(), d);
+  auto dispGlobalFunc = Dune::Functions::makeDiscreteGlobalBasisFunction<Dune::FieldVector<double, 3>>(basis.flat(), d);
 
   Dune::Vtk::DiscontinuousIgaDataCollector dataCollector(gridView, 0);
   Dune::Vtk::UnstructuredGridWriter vtkWriter(dataCollector, Dune::Vtk::FormatTypes::ASCII);
@@ -143,10 +143,10 @@ auto run_calculation(int degree, int refinement) {
     }
     nodalDisplacements(i) = localDisplacements(vertexWithMaxDisplacement)[2];
     ++i;
-    
   }
 
-  return std::make_tuple(*std::ranges::max_element(nodalDisplacements), informations.iterations, sparseAssembler.reducedSize());
+  return std::make_tuple(*std::ranges::max_element(nodalDisplacements), informations.iterations,
+                         sparseAssembler.reducedSize());
 }
 
 int main(int argc, char** argv) {
