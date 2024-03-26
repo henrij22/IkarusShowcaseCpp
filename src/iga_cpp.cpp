@@ -149,13 +149,19 @@ auto run_calculation(int degree, int refinement) {
                          sparseAssembler.reducedSize());
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char* argv[]) {
   Ikarus::init(argc, argv);
   Timer<> timer{};
 
+  // If we are in testing mode (e.g. through GH Action, we only run one iteration)
+  bool testing = argc > 1 && std::strcmp(argv[1], "testing") == 0;
+
+  auto degreeRange     = Dune::range(2, testing ? 3 : 5);
+  auto refinementRange = Dune::range(3, testing ? 4 : 7);
+
   std::vector<std::tuple<int, int, double, int, int, Timer<>::Period>> results{};
-  for (auto i : Dune::range(2, 5)) {
-    for (auto j : Dune::range(3, 7)) {
+  for (auto i : degreeRange) {
+    for (auto j : refinementRange) {
       timer.startTimer("total");
       auto [max_d, iterations, dofs] = run_calculation(i, j);
       results.emplace_back(i, j, max_d, iterations, dofs, timer.stopTimer("total").count());

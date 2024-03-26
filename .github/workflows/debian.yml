@@ -18,13 +18,6 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          #          - {
-          #            name: "Clang-Debug",
-          #            config: Debug,
-          #            compilerC: clang-12,
-          #            compilerCxx: clang++-12,
-          #            lib: "-stdlib=libc++",
-          #           }
           - {
             name: "Clang-Release",
             config: Release,
@@ -33,13 +26,6 @@ jobs:
             compilerCxx: clang++-16,
             lib: "-stdlib=libc++",
           }
-          #          - {
-          #            name: "GCC-Debug",
-          #            config: Debug,
-          #            compilerC: gcc-12,
-          #            compilerCxx: g++-12,
-          #            lib: ""
-          #          }
           - {
             name: "GCC-Release",
             config: Release,
@@ -62,4 +48,4 @@ jobs:
       - name: Run all examples
         working-directory: ./repo/cmake-build-${{ matrix.config.config }}/src
         run: |
-          echo "Testing ..." && ./iga_cpp;
+          echo "Testing ..." && ./iga_cpp testing;
