@@ -9,10 +9,11 @@
 
 #include <dune/functions/functionspacebases/subspacebasis.hh>
 #include <dune/functions/gridfunctions/discreteglobalbasisfunction.hh>
-#include <dune/iga/io/ibra/ibrareader.hh>
-#include <dune/iga/io/igadatacollector.hh>
+#include <dune/iga/hierarchicpatch/patchgrid.hh>
+#include <dune/iga/io/ibrareader.hh>
+#include <dune/iga/io/vtk/igadatacollector.hh>
 #include <dune/iga/nurbsbasis.hh>
-#include <dune/iga/nurbsgrid.hh>
+#include <dune/iga/trimmer/defaulttrimmer/trimmer.hh>
 #include <dune/iga/utils/igahelpers.hh>
 #include <dune/vtk/vtkwriter.hh>
 #include <dune/vtk/writers/unstructuredgridwriter.hh>
@@ -34,6 +35,9 @@
 #include <ikarus/utils/observer/genericobserver.hh>
 #include <ikarus/utils/observer/observermessages.hh>
 
+
+using namespace Dune::IGANEW;
+
 auto run_calculation(int degree, int refinement) {
   /// Defs
   const double nu   = 0.0;
@@ -41,11 +45,18 @@ auto run_calculation(int degree, int refinement) {
   const double thk  = 0.1;
   const bool trim   = true;
 
-  using Grid     = Dune::IGA::NURBSGrid<2, 3>;
-  using GridView = Grid::LeafGridView;
+  using PatchGrid   = PatchGrid<2, 3, DefaultTrim::PatchGridFamily>;
+  using GridFactory = Dune::GridFactory<PatchGrid>;
 
-  const auto grid = Dune::IGA::IbraReader<2, 3>::read("input/plate_holes.ibra", trim, {degree - 1, degree - 1});
-  grid->globalRefine(refinement);
+  using GridView = PatchGrid::LeafGridView;
+
+  auto igaGridFactory = GridFactory();
+  igaGridFactory.insertJson("input/plate_holes.ibra", true, {refinement, refinement});
+  igaGridFactory.insertTrimParameters(GridFactory::TrimParameterType{120});
+
+  auto grid = igaGridFactory.createGrid();
+  grid->degreeElevateOnAllLevels({degree -1, degree -1});
+
   const GridView gridView = grid->leafGridView();
 
   using namespace Dune::Functions::BasisFactory;
@@ -65,7 +76,7 @@ auto run_calculation(int degree, int refinement) {
 
   auto sk = Ikarus::skills(Ikarus::kirchhoffLoveShell({.youngs_modulus = Emod, .nu = nu, .thickness = thk}),
                            Ikarus::volumeLoad<3>(vL));
-
+ 
   using KLShell = decltype(Ikarus::makeFE(basis, sk));
   std::vector<KLShell> fes;
 
@@ -73,6 +84,9 @@ auto run_calculation(int degree, int refinement) {
     fes.emplace_back(Ikarus::makeFE(basis, sk));
     fes.back().bind(element);
   }
+
+  // Set parameters for integration rule 
+  Preferences::getInstance().boundaryDivisions(8);
 
   /// Create a sparse assembler
   auto sparseAssembler = Ikarus::SparseFlatAssembler(fes, dirichletValues);
@@ -121,31 +135,10 @@ auto run_calculation(int degree, int refinement) {
 
   vtkWriter.addPointData(dispGlobalFunc, Dune::VTK::FieldInfo("displacement", Dune::VTK::FieldInfo::Type::vector, 3));
 
-  vtkWriter.write("result");
+  vtkWriter.write("result_r" + std::to_string(refinement) + "_d" + std::to_string(degree));
 
-  // Determine max displacement in z-direction (not trivially done in trimmed iga)
-  auto localDisplacements            = localFunction(dispGlobalFunc);
-  Eigen::VectorXd nodalDisplacements = Eigen::VectorXd::Zero(gridView.size(0));
-  for (int i = 0; auto& fe : fes) {
-    auto& gridElement = fe.gridElement();
-    localDisplacements.bind(gridElement);
-    Dune::FieldVector<double, 2> vertexWithMaxDisplacement;
-    if (gridElement.impl().isTrimmed()) {
-      auto subGrid              = fe.gridElement().impl().elementSubGrid();
-      vertexWithMaxDisplacement = *std::ranges::max_element(subGrid->vertices_, [&](const auto& v1, const auto& v2) {
-        return localDisplacements(v1)[2] < localDisplacements(v2)[2];
-      });
-    } else {
-      auto vertices             = Ikarus::utils::referenceElementVertexPositions(fe);
-      vertexWithMaxDisplacement = *std::ranges::max_element(vertices, [&](const auto& v1, const auto& v2) {
-        return localDisplacements(v1)[2] < localDisplacements(v2)[2];
-      });
-    }
-    nodalDisplacements(i) = localDisplacements(vertexWithMaxDisplacement)[2];
-    ++i;
-  }
 
-  return std::make_tuple(*std::ranges::max_element(nodalDisplacements), informations.iterations,
+  return std::make_tuple(informations.iterations,
                          sparseAssembler.reducedSize());
 }
 
@@ -156,20 +149,20 @@ int main(int argc, char* argv[]) {
   // If we are in testing mode (e.g. through GH Action, we only run one iteration)
   bool testing = argc > 1 && std::strcmp(argv[1], "testing") == 0;
 
-  auto degreeRange     = Dune::range(2, testing ? 3 : 5);
-  auto refinementRange = Dune::range(3, testing ? 4 : 7);
+  auto degreeRange     = Dune::range(2, testing ? 3 : 3);
+  auto refinementRange = Dune::range(3, testing ? 4 : 5);
 
-  std::vector<std::tuple<int, int, double, int, int, Timer<>::Period>> results{};
+  std::vector<std::tuple<int, int, int, int, Timer<>::Period>> results{};
   for (auto i : degreeRange) {
     for (auto j : refinementRange) {
       timer.startTimer("total");
-      auto [max_d, iterations, dofs] = run_calculation(i, j);
-      results.emplace_back(i, j, max_d, iterations, dofs, timer.stopTimer("total").count());
+      auto [iterations, dofs] = run_calculation(i, j);
+      results.emplace_back(i, j, iterations, dofs, timer.stopTimer("total").count());
     }
   }
 
-  for (auto [degree, refinement, max_d, iterations, dofs, seconds] : results)
-    std::cout << "Degree: " << degree << ", Ref: " << refinement << ", max_d: " << max_d
-              << ", iterations: " << iterations << ", Dofs: " << dofs << ", Compute time: " << seconds << std::endl;
+  // for (auto [degree, refinement, max_d, iterations, dofs, seconds] : results)
+  //   std::cout << "Degree: " << degree << ", Ref: " << refinement << ", max_d: " << max_d
+  //             << ", iterations: " << iterations << ", Dofs: " << dofs << ", Compute time: " << seconds << std::endl;
   return 0;
 }

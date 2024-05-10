@@ -4,7 +4,7 @@
 version: "3.3"
 services:
   OpenIkarusContainer-clang:
-    image: ikarusproject/ikarus-clang:latest
+    image: ikarusproject/ikarus-clang:experimental
     entrypoint: /bin/bash
     tty: true
     user: root
