@@ -5,6 +5,7 @@
   #include "config.h"
 #endif
 
+#include "controlwriter.hh"
 #include "timer.h"
 
 #include <dune/functions/functionspacebases/subspacebasis.hh>
@@ -32,6 +33,7 @@
 #include <ikarus/utils/linearalgebrahelper.hh>
 #include <ikarus/utils/nonlinearoperator.hh>
 #include <ikarus/utils/observer/genericobserver.hh>
+#include <ikarus/utils/observer/nonlinearsolverlogger.hh>
 #include <ikarus/utils/observer/observermessages.hh>
 
 auto run_calculation(int degree, int refinement) {
@@ -112,7 +114,20 @@ auto run_calculation(int degree, int refinement) {
   settings.verbosity = 0;
   trustRegion->setup(settings);
 
-  auto informations = trustRegion->solve();
+  auto nonLinearSolverObserver = std::make_shared<Ikarus::NonLinearSolverLogger>();
+  auto controlWriter =
+      std::make_shared<Ikarus::ControlSubsamplingVertexVTKWriterIGA<std::remove_cvref_t<decltype(basis.flat())>>>(
+          basis.flat(), d, 0);
+  controlWriter->setFileNamePrefix("timeline");
+  controlWriter->setFieldInfo("displacement", Dune::VTK::FieldInfo::Type::vector, 3);
+
+  trustRegion->subscribeAll(nonLinearSolverObserver);
+  
+  auto lc = Ikarus::LoadControl(trustRegion, 20, {0, 1});
+
+  // auto informations = trustRegion->solve();
+  lc.subscribeAll(controlWriter);
+  auto informations = lc.run();
 
   auto dispGlobalFunc = Dune::Functions::makeDiscreteGlobalBasisFunction<Dune::FieldVector<double, 3>>(basis.flat(), d);
 
@@ -145,7 +160,7 @@ auto run_calculation(int degree, int refinement) {
     ++i;
   }
 
-  return std::make_tuple(*std::ranges::max_element(nodalDisplacements), informations.iterations,
+  return std::make_tuple(*std::ranges::max_element(nodalDisplacements), informations.totalIterations,
                          sparseAssembler.reducedSize());
 }
 
@@ -156,8 +171,8 @@ int main(int argc, char* argv[]) {
   // If we are in testing mode (e.g. through GH Action, we only run one iteration)
   bool testing = argc > 1 && std::strcmp(argv[1], "testing") == 0;
 
-  auto degreeRange     = Dune::range(2, testing ? 3 : 5);
-  auto refinementRange = Dune::range(3, testing ? 4 : 7);
+  auto degreeRange     = Dune::range(3, testing ? 4 : 4);
+  auto refinementRange = Dune::range(4, testing ? 5 : 5);
 
   std::vector<std::tuple<int, int, double, int, int, Timer<>::Period>> results{};
   for (auto i : degreeRange) {
